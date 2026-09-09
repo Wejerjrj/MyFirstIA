@@ -77,7 +77,11 @@ if uploaded_file is not None:
     st.image(image, caption="Image envoyée", width="stretch")
 
     img_resized = image.resize((96, 96))
-    img_array = np.expand_dims(np.array(img_resized), axis=0).astype("float32") / 255.0
+    # ATTENTION: pas de /255.0 ici ! Le modele a deja sa propre couche
+    # Rescaling(scale=1/127.5, offset=-1) qui attend des pixels bruts [0,255].
+    # Diviser par 255 ici ecrasait l'image dans une plage minuscule
+    # pres de -1, rendant le modele quasi aveugle a l'image reelle.
+    img_array = np.expand_dims(np.array(img_resized), axis=0).astype("float32")
     prediction = model.predict(img_array)[0][0]
 
     if prediction > 0.5:
