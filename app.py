@@ -10,9 +10,13 @@ st.write("Upload une photo et l'IA te dit si elle est réelle ou générée.")
 @st.cache_resource
 def load_model():
     m = tf.keras.models.load_model("ai_detector_model.keras")
-    # --- FIX KERAS ---
-    # On force la construction du graphe symbolique pour que model.output soit défini
-    _ = m(tf.keras.Input(shape=(96, 96, 3)))
+    
+    # --- NOUVEAU FIX ---
+    # On fait une passe d'inférence silencieuse avec des zéros. 
+    # Ça initialise le modèle en profondeur sans créer de couche "input_layer" en double !
+    dummy_array = np.zeros((1, 96, 96, 3), dtype=np.float32)
+    _ = m(dummy_array)
+    
     return m
 
 model = load_model()
@@ -57,7 +61,6 @@ uploaded_file = st.file_uploader("Choisis une image", type=["jpg", "jpeg", "png"
 if uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
     
-    # --- FIX STREAMLIT ---
     st.image(image, caption="Image envoyée", width="stretch")
 
     img_resized = image.resize((96, 96))
@@ -72,5 +75,4 @@ if uploaded_file is not None:
     heatmap = make_gradcam_heatmap(img_array, model)
     overlay = overlay_heatmap(image, heatmap)
     
-    # --- FIX STREAMLIT ---
     st.image(overlay, caption="Zones ayant influencé la décision", width="stretch")
