@@ -10,28 +10,41 @@ st.write("Upload une photo et l'IA te dit si elle est réelle ou générée.")
 @st.cache_resource
 def load_model():
     m = tf.keras.models.load_model("ai_detector_model.keras")
-    
-    # --- NOUVEAU FIX ---
-    # On fait une passe d'inférence silencieuse avec des zéros. 
-    # Ça initialise le modèle en profondeur sans créer de couche "input_layer" en double !
-    dummy_array = np.zeros((1, 96, 96, 3), dtype=np.float32)
-    _ = m(dummy_array)
-    
     return m
 
 model = load_model()
 
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name="out_relu"):
     base_model = model.layers[1]
+    base_idx = model.layers.index(base_model)
     last_conv_layer = base_model.get_layer(last_conv_layer_name)
 
+    # On construit le grad_model UNIQUEMENT à partir du sous-modèle interne
+    # (base_model). Son graphe existe depuis sa création (Functional API),
+    # donc .input/.output sont toujours valides.
+    # Le modèle Sequential englobant, lui, n'a jamais de .output défini en
+    # Keras 3 tant qu'il n'a pas été appelé de façon symbolique (avec un
+    # keras.Input) — un appel "eager" avec un vrai tableau ne suffit pas,
+    # d'où l'erreur "the layer sequential has never been called".
     grad_model = tf.keras.models.Model(
-        inputs=model.inputs,
-        outputs=[last_conv_layer.output, model.output]
+        inputs=base_model.input,
+        outputs=[last_conv_layer.output, base_model.output]
     )
 
     with tf.GradientTape() as tape:
-        conv_outputs, predictions = grad_model(img_array)
+        x = tf.convert_to_tensor(img_array)
+
+        # Couches AVANT base_model (ex: Rescaling) : on les rejoue à la main
+        for layer in model.layers[:base_idx]:
+            x = layer(x, training=False)
+
+        conv_outputs, base_output = grad_model(x)
+
+        # Couches APRÈS base_model (GAP, Dense, ...) : idem, à la main
+        predictions = base_output
+        for layer in model.layers[base_idx + 1:]:
+            predictions = layer(predictions, training=False)
+
         if predictions[0][0] > 0.5:
             loss = predictions[:, 0]
         else:
